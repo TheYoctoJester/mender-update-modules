@@ -1,0 +1,62 @@
+#!/bin/sh
+
+set -e
+
+STATE="$1"
+FILES="$2"
+
+case "$STATE" in
+
+    NeedsArtifactReboot)
+        echo "No"
+        ;;
+
+    SupportsRollback)
+        echo "No"
+        ;;
+
+    Download)
+        printf "DEBUG: Starting stream files loop\n"
+
+        # Loop to read filenames from stream-next and copy them to /tmp
+        while true; do
+            printf "DEBUG: Reading next filename from stream-next...\n"
+            
+            # Read the next filename
+            file=`cat stream-next`
+            
+            printf "DEBUG: Read filename: '%s'\n" "$file"
+            
+            # Check if we got an empty string - if so, exit the loop
+            if [ "$file" = "" ]; then
+                printf "DEBUG: Empty string detected, breaking loop\n"
+                break
+            fi
+            
+            # Extract just the filename (basename) for the destination
+            filename=`basename "$file"`
+            printf "DEBUG: Extracted basename: '%s'\n" "$filename"
+            
+            # Check if source file exists before copying
+            if [ ! -f "$file" ]; then
+                printf "DEBUG: WARNING - Source file '%s' does not exist!\n" "$file"
+                continue
+            fi
+            
+            # Stream the file to /tmp with the same name
+            printf "DEBUG: Copying '%s' to '/tmp/%s'...\n" "$file" "$filename"
+            cat "$file" > "/tmp/$filename"
+            
+            # Verify the copy was successful
+            if [ $? -eq 0 ]; then
+                printf "DEBUG: Successfully copied %s to /tmp/%s\n" "$file" "$filename"
+            else
+                printf "DEBUG: ERROR - Failed to copy %s\n" "$file"
+            fi
+        done
+
+        printf "DEBUG: Streaming complete - stream-next returned empty string\n"
+        ;;
+esac
+
+exit 0
