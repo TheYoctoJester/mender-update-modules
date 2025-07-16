@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# Banner Update Module
+# Updates the system banner/MOTD displayed when users log in
+
+set -e
+
+STATE="$1"
+FILES="$2"
+
+BANNER_FILE="/etc/motd"
+BACKUP_FILE="/var/lib/mender/banner.backup"
+
+case "$STATE" in
+    NeedsArtifactReboot)
+        echo "No"
+        ;;
+    
+    SupportsRollback)
+        echo "Yes"
+        ;;
+    
+    ProvidePayloadFileSizes)
+        # This is a metadata-only module, no payload files
+        echo "No"
+        ;;
+    
+    Download)
+        # This is a metadata-only module, nothing to download
+        echo "Download state - nothing to do for metadata-only module"
+        ;;
+    
+    ArtifactInstall)
+        # Create backup directory if it doesn't exist
+        mkdir -p "$(dirname "$BACKUP_FILE")"
+        
+        # Backup current banner if it exists
+        if [ -f "$BANNER_FILE" ]; then
+            cp "$BANNER_FILE" "$BACKUP_FILE"
+            echo "Backed up current banner to $BACKUP_FILE"
+        else
+            # Create empty backup to track that original didn't exist
+            touch "$BACKUP_FILE"
+            echo "No existing banner found, created empty backup"
+        fi
+        
+        # Read banner text from metadata
+        BANNER_TEXT=$(jq -r '.banner_text' "$FILES/header/meta-data" 2>/dev/null || echo "")
+        
+        if [ -z "$BANNER_TEXT" ] || [ "$BANNER_TEXT" = "null" ]; then
+            echo "Error: No banner_text found in metadata"
+            exit 1
+        fi
+        
+        # Write new banner
+        echo "$BANNER_TEXT" > "$BANNER_FILE"
+        echo "Updated banner with: $BANNER_TEXT"
+        ;;
+    
+    ArtifactRollback)
+        if [ -f "$BACKUP_FILE" ]; then
+            if [ -s "$BACKUP_FILE" ]; then
+                # Restore from backup
+                cp "$BACKUP_FILE" "$BANNER_FILE"
+                echo "Restored banner from backup"
+            else
+                # Remove banner file if backup is empty (original didn't exist)
+                rm -f "$BANNER_FILE"
+                echo "Removed banner file (original didn't exist)"
+            fi
+            # Clean up backup
+            rm -f "$BACKUP_FILE"
+        else
+            echo "Warning: No backup found for rollback"
+        fi
+        ;;
+    
+    ArtifactCommit)
+        # Clean up backup after successful commit
+        rm -f "$BACKUP_FILE"
+        echo "Committed banner update, removed backup"
+        ;;
+    
+    Cleanup)
+        # Clean up any temporary files
+        rm -f "$BACKUP_FILE"
+        echo "Cleaned up banner module"
+        ;;
+    
+    ArtifactFailure)
+        # Handle installation failure - same as rollback
+        if [ -f "$BACKUP_FILE" ]; then
+            if [ -s "$BACKUP_FILE" ]; then
+                # Restore from backup
+                cp "$BACKUP_FILE" "$BANNER_FILE"
+                echo "Restored banner from backup due to failure"
+            else
+                # Remove banner file if backup is empty (original didn't exist)
+                rm -f "$BANNER_FILE"
+                echo "Removed banner file due to failure (original didn't exist)"
+            fi
+            # Clean up backup
+            rm -f "$BACKUP_FILE"
+        else
+            echo "Warning: No backup found for rollback"
+        fi
+        ;;
+    
+    *)
+        echo "Unknown state: $STATE"
+        exit 1
+        ;;
+esac
+
+exit 0

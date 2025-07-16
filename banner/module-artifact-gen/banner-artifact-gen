@@ -1,0 +1,141 @@
+#!/bin/bash
+
+# Banner Artifact Generator
+# Creates Mender artifacts for banner updates
+
+set -e
+
+# Default values
+DEVICE_TYPES_ARRAY=()
+ARTIFACT_NAME=""
+OUTPUT_PATH=""
+BANNER_TEXT=""
+MENDER_ARTIFACT_TOOL="mender-artifact"
+
+show_help() {
+    cat <<EOF
+Usage: $0 [options]
+
+Options:
+    -n, --artifact-name NAME     Artifact name (required)
+    -t, --device-type TYPE       Target device type (can be specified multiple times)
+    -o, --output-path PATH       Output artifact path (required)
+    -b, --banner-text TEXT       Banner text to display (required)
+    -h, --help                   Show this help message
+
+Examples:
+    $0 -n banner-v1.0 -t raspberry-pi -o banner.mender -b "Welcome to Production!"
+    $0 -n welcome-msg -t device-type-1 -t device-type-2 -o welcome.mender -b "Hello World!"
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -n|--artifact-name)
+            ARTIFACT_NAME="$2"
+            shift 2
+            ;;
+        -t|--device-type)
+            DEVICE_TYPES_ARRAY+=("$2")
+            shift 2
+            ;;
+        -o|--output-path)
+            OUTPUT_PATH="$2"
+            shift 2
+            ;;
+        -b|--banner-text)
+            BANNER_TEXT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$ARTIFACT_NAME" ]; then
+    echo "Error: Artifact name is required"
+    show_help
+    exit 1
+fi
+
+if [ -z "$OUTPUT_PATH" ]; then
+    echo "Error: Output path is required"
+    show_help
+    exit 1
+fi
+
+if [ -z "$BANNER_TEXT" ]; then
+    echo "Error: Banner text is required"
+    show_help
+    exit 1
+fi
+
+if [ ${#DEVICE_TYPES_ARRAY[@]} -eq 0 ]; then
+    echo "Error: At least one device type is required"
+    show_help
+    exit 1
+fi
+
+# Check if mender-artifact tool exists
+if ! command -v $MENDER_ARTIFACT_TOOL &> /dev/null; then
+    echo "Error: $MENDER_ARTIFACT_TOOL not found in PATH"
+    echo "Please install mender-artifact or ensure it's in your PATH"
+    exit 1
+fi
+
+# Create temporary directory for metadata
+TEMP_DIR=$(mktemp -d)
+METADATA_FILE="$TEMP_DIR/meta-data.json"
+
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+# Create metadata JSON
+cat > "$METADATA_FILE" <<EOF
+{
+    "banner_text": "$BANNER_TEXT"
+}
+EOF
+
+echo "Created metadata file: $METADATA_FILE"
+echo "Banner text: $BANNER_TEXT"
+
+# Build device types arguments
+DEVICE_TYPES_ARGS=()
+for device_type in "${DEVICE_TYPES_ARRAY[@]}"; do
+    DEVICE_TYPES_ARGS+=("-t" "$device_type")
+done
+
+# Create the artifact
+echo "Creating banner artifact..."
+$MENDER_ARTIFACT_TOOL write module-image \
+    "${DEVICE_TYPES_ARGS[@]}" \
+    -o "$OUTPUT_PATH" \
+    -n "$ARTIFACT_NAME" \
+    -T banner \
+    -m "$METADATA_FILE"
+
+echo "Banner artifact created successfully: $OUTPUT_PATH"
+echo "Artifact name: $ARTIFACT_NAME"
+echo "Device types: ${DEVICE_TYPES_ARRAY[*]}"
+echo "Banner text: $BANNER_TEXT"
+
+# Validate the created artifact
+echo "Validating artifact..."
+if $MENDER_ARTIFACT_TOOL validate "$OUTPUT_PATH"; then
+    echo "Artifact validation successful!"
+else
+    echo "Artifact validation failed!"
+    exit 1
+fi
